@@ -1,0 +1,41 @@
+version: "3.8" # Docker Compose-Syntax-Version
+
+services:
+  postgres:
+    image: postgres:16 # Verwendetes PostgreSQL-Image (Version 16)
+    ports:
+      - "5432:5432" # PostgreSQL ist vom Host aus unter localhost:5432 erreichbar
+    environment:
+      POSTGRES_USER: postgres # Benutzername für den Datenbankzugriff
+      POSTGRES_PASSWORD: postgres # Passwort für den Benutzer
+    volumes:
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql # Initiale SQL-Skripte (Schema, Tabelle, Publication)
+      - ./postgres/custom.conf:/etc/postgresql/postgresql.conf # Eigene Konfiguration z. B. für logical replication
+    command: postgres -c config_file=/etc/postgresql/postgresql.conf # Startbefehl mit eigener Konfig
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"] # Überprüft, ob die DB erreichbar ist
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7 # Redis-Server, fungiert als Ziel für die Change-Events (CDC-Sink)
+    ports:
+      - "6379:6379" # Redis ist vom Host aus erreichbar
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"] # Überprüft, ob Redis einsatzbereit ist
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  debezium-server:
+    build: . # Dockerfile im aktuellen Verzeichnis wird verwendet
+    depends_on:
+      postgres:
+        condition: service_healthy # Warte, bis PostgreSQL bereit ist
+      redis:
+        condition: service_healthy # Warte, bis Redis bereit ist
+    restart: on-failure # Neustart, wenn der Container fehlschlägt (z. B. wegen Timing)
+    volumes:
+      - ./application.properties:/debezium/conf/application.properties # Konfiguration für Debezium Server
+
